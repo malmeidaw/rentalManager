@@ -1,0 +1,60 @@
+
+services:
+  motorbikeconsumer:
+    image: motorbikeconsumer
+    build:
+      context: .
+      dockerfile: ./Dockerfile
+    container_name: motorbikeconsumer
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ConnectionStrings__DbConnection=Host=postgres;Port=5432;Username=math_almeida_willians;Password=pwd123;Database=demo_db
+      - RabbitMQ__HostName=rabbitmq
+      - RabbitMQ__Port=5672 #internal networking
+      - RabbitMQ__UserName=guest
+      - RabbitMQ__Password=guest
+    ports:
+      - "5000:80"
+    depends_on:
+      - postgres
+      - rabbitmq
+    networks:
+      - app-network
+    restart: unless-stopped
+  postgres:
+    image: postgres:15-alpine
+    container_name: demo_postgres
+    environment:
+      POSTGRES_DB: demo_db
+      POSTGRES_USER: math_almeida_willians
+      POSTGRES_PASSWORD: pwd123
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - app-network
+    restart: unless-stopped
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    container_name: demo_rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    networks:
+      - app-network
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  rabbitmq_data:
+
+networks:
+  app-network:
+    driver: bridge
+
