@@ -23,6 +23,7 @@ MotorbikeConsumer/secrets.json
 MotorbikeConsumer/appsettings.Development.json
 MotorbikeConsumer/.DS_Store
 MotorbikeConsumer/Thumbs.db
+MotorbikeConsumer/GrantPermissionsDB
 
 RentalManager/bin/
 RentalManager/obj/

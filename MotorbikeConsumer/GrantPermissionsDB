@@ -1,19 +1,13 @@
--- Conectar como postgres ao banco correto
 \c demo_db
 
--- 1. Permissões para tabelas existentes
 GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO math_almeida_willians;
 
--- 2. Permissões para sequences existentes  
 GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO math_almeida_willians;
 
--- 3. Permissões para tabelas futuras
 ALTER DEFAULT PRIVILEGES IN SCHEMA public 
 GRANT ALL PRIVILEGES ON TABLES TO math_almeida_willians;
 
--- 4. Permissões para sequences futuras
 ALTER DEFAULT PRIVILEGES IN SCHEMA public 
 GRANT ALL PRIVILEGES ON SEQUENCES TO math_almeida_willians;
 
--- 5. Permissão para o schema (se necessário)
 GRANT USAGE ON SCHEMA public TO math_almeida_willians;

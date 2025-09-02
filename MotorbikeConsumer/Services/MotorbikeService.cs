@@ -31,36 +31,71 @@ public class MotorbikeService : IMotorbikeService
 
     public async Task CreateMotorbikeAsync(Motorbike motorbike)
     {
-        using var scope = _scopeFactory.CreateScope();
-        var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        context.Motorbikes.Add(motorbike);
         try
         {
+            using var scope = _scopeFactory.CreateScope();
+            var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            context.Motorbikes.Add(motorbike);
             await context.SaveChangesAsync();
             _logger.LogInformation($"{motorbike.Id} saved in database.");
-            Console.WriteLine($"{motorbike.Id} saved in database.");
         }
-        catch (Exception ex) { _logger.LogError($"Failed database changes {ex.Message}"); }
+        catch (Exception ex)
+        {
+            _logger.LogError($"Failed database changes {ex.Message}");
+        }
         
     }
     public async Task<List<Motorbike>> GetMotorbikeAsync()
     {
-        using var scope = _scopeFactory.CreateScope();
-        var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        return await context.Motorbikes.ToListAsync();
+        try
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            return await context.Motorbikes.ToListAsync();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError($"Failed database query {ex.Message}");
+            return new List<Motorbike>();
+        }
+        
     }
     public async Task<Motorbike?> GetMotorbikeAsync(string? id)
     {
-        using var scope = _scopeFactory.CreateScope();
-        var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        return await context.Motorbikes.FirstOrDefaultAsync(m => m.Id == id);
+        try
+        {
+            if (String.IsNullOrEmpty(id))
+            {
+                _logger.LogInformation($"No id provided to search");
+            }
+            using var scope = _scopeFactory.CreateScope();
+            var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            return await context.Motorbikes.FirstOrDefaultAsync(m => m.Id == id);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError($"Failed database query {ex.Message}");
+            return null;
+        }
     }
 
     public async Task<Motorbike?> GetMotorbikeByPlateAsync(string? plate)
     {
-        using var scope = _scopeFactory.CreateScope();
-        var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        return await context.Motorbikes.FirstOrDefaultAsync(m => m.Plate == plate);
+        try
+        {
+            if (String.IsNullOrEmpty(plate))
+            {
+                _logger.LogInformation($"No plate provided to search");
+            }
+            using var scope = _scopeFactory.CreateScope();
+            var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            return await context.Motorbikes.FirstOrDefaultAsync(m => m.Plate == plate);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError($"Failed database query {ex.Message}");
+            return null;
+        }
     }
     public async Task UpdateMotorbikeAsync(Motorbike motorbike)
     {
@@ -79,45 +114,63 @@ public class MotorbikeService : IMotorbikeService
         }
         catch (Exception ex)
         {
-            _logger.LogError($"{ex.Message}");
-            Console.WriteLine($"{ex.Message}");
+            _logger.LogError($"Error updating motorbike {ex.Message}");
         }
     }
     public async Task<DeleteResult?> DeleteMotorbikeAsync(Motorbike motorbike)
     {
-        string id = motorbike.Id;
-        using var scope = _scopeFactory.CreateScope();
-        var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        var rentals = await context.Rentals.AnyAsync(r => r.MotorbikeId == id);
-        if (rentals)
+        try
         {
+            string id = motorbike.Id;
+            using var scope = _scopeFactory.CreateScope();
+            var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var rentals = await context.Rentals.AnyAsync(r => r.MotorbikeId == id);
+            if (rentals)
+            {
+                _logger.LogInformation($"There is a rental with this motorbike {id}");
+                return new DeleteResult
+                {
+                    Success = false,
+                    Message = $"There is a rental with this motorbike {id}",
+                };
+            }
+            else
+            {
+                try
+                {
+                    await context.Motorbikes.Where(m => m.Id == id).ExecuteDeleteAsync(); //check if it exists?
+                    await context.SaveChangesAsync();
+                    _logger.LogInformation($"{motorbike.Id} deleted from database.");
+                    return new DeleteResult
+                    {
+                        Success = true,
+                        Message = $"Motorbike {id} deleted",
+                    };
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError($"Failed database changes {ex.Message}");
+                    return new DeleteResult
+                    {
+                        Success = false,
+                        Message = $"Failed database changes {ex.Message}",
+                    };
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError($"Failed database changes {ex.Message}");
             return new DeleteResult
             {
                 Success = false,
-                Message = $"There is a rental with this motorbike {id}",
+                Message = $"Failed database changes {ex.Message}",
             };
         }
-        else
-        {
-            await context.Motorbikes.Where(m => m.Id == id).ExecuteDeleteAsync(); //check if it exists?
-            try
-            {
-                await context.SaveChangesAsync();
-                _logger.LogInformation($"{motorbike.Id} deleted from database.");
-                Console.WriteLine($"{motorbike.Id} deleted from database.");
-            }
-            catch (Exception ex) { _logger.LogError($"Failed database changes {ex.Message}"); }
-            return new DeleteResult
-            {
-                Success = true,
-                Message = $"Motorbike {id} deleted",
-            };
-        }
-
     }
     public void Notify2024(Motorbike motorbike)
     {
-        Console.WriteLine($"{motorbike.Id} is from 2024");
+        _logger.LogInformation($"{motorbike.Id} is from 2024");
     }
 }
 

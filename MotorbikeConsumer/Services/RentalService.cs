@@ -5,6 +5,7 @@ using Microsoft.EntityFrameworkCore;
 using MotorbikeConsumer.Utils;
 using System.Diagnostics.CodeAnalysis;
 using Microsoft.Extensions.Logging;
+using System.Linq.Expressions;
 
 namespace RentalConsumer.Services;
 
@@ -30,15 +31,14 @@ public class RentalService : IRentalService
 
     public async Task CreateRentalAsync(Rental rental)
     {
-        using var scope = _scopeFactory.CreateScope();
-        var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         try
         {
+            using var scope = _scopeFactory.CreateScope();
+            var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
             var deliveryMan = await context.DeliveryMans.FirstOrDefaultAsync(d => d.Id == rental.DeliveryManId);
             if (deliveryMan == null)
             {
                 _logger.LogError($"{rental.DeliveryManId} does not exist");
-                Console.WriteLine($"{rental.DeliveryManId} does not exist");
                 return;
             }
             if (deliveryMan.DriversLicenseType == DriversLicenseType.A ||
@@ -49,7 +49,6 @@ public class RentalService : IRentalService
                 if (motorbike == null)
                 {
                     _logger.LogError($"{rental.MotorbikeId} does not exist");
-                    Console.WriteLine($"{rental.MotorbikeId} does not exist");
                     return;
                 }
                 //checking if motorbike is already being rented
@@ -57,7 +56,6 @@ public class RentalService : IRentalService
                 if (otherRental != null)
                 {
                     _logger.LogError($"{rental.MotorbikeId} is already being rented.");
-                    Console.WriteLine($"{rental.MotorbikeId} is already being rented.");
                     return;
                 }
                 //check if date range does not correspond with chosen plan?
@@ -66,79 +64,54 @@ public class RentalService : IRentalService
                     context.Rentals.Add(rental);
                     await context.SaveChangesAsync();
                     _logger.LogInformation($"{rental.Id} saved in database");
-                    Console.Write($"{rental.Id} saved in database");
                 }
                 catch (Exception ex) { _logger.LogError($"Failed database changes {ex.Message}"); }
-                Console.WriteLine($"{rental.Id} saved in database.");
+                _logger.LogInformation($"{rental.Id} saved in database.");
             }
         }
         catch (Exception ex)
         {
             _logger.LogError($"{ex.Message}");
-            Console.WriteLine($"{ex.Message}");
         }
     }
     public async Task<Rental?> GetRentalAsync(string? id)
     {
-        using var scope = _scopeFactory.CreateScope();
-        var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        return await context.Rentals.FirstOrDefaultAsync(r => r.Id == id);
+        try
+        {
+            if (string.IsNullOrEmpty(id))
+            {
+                _logger.LogInformation("Rental Id not provided");
+            }
+            using var scope = _scopeFactory.CreateScope();
+            var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            return await context.Rentals.FirstOrDefaultAsync(r => r.Id == id);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError($"Failed to get rental by id {id} {ex.Message}");
+            return null;
+        }
     }
 
-    public async Task<RentalResponse?> UpdateRentalAsync(string? id, DateTime newExpectedEndDate )
+    public async Task<RentalResponse?> UpdateRentalAsync(string? id, DateTime newExpectedEndDate)
     {
-        using var scope = _scopeFactory.CreateScope();
-        var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        Rental? r = context.Rentals.Find(id);
         RentalResponse? rentalResponse = null;
-        if (r != null)
+        try
         {
-            rentalResponse = new RentalResponse(r);
-            var uDaysDifference = (int)(newExpectedEndDate - r.StartDate).TotalDays;
-            var lDaysDifference = (int)(r.ExpectedEndDate - r.StartDate).TotalDays;
-            if (newExpectedEndDate == r.ExpectedEndDate)
+            using var scope = _scopeFactory.CreateScope();
+            var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            Rental? r = context.Rentals.Find(id);
+            if (r != null)
             {
-                rentalResponse.TotalRentalValue = r.RentalType switch
-                {
-                    RentalType.Days7 => uDaysDifference * (int)RentalTypePrices.Days7,
-                    RentalType.Days15 => uDaysDifference * (int)RentalTypePrices.Days15,
-                    RentalType.Days30 => uDaysDifference * (int)RentalTypePrices.Days30,
-                    RentalType.Days45 => uDaysDifference * (int)RentalTypePrices.Days45,
-                    RentalType.Days50 => uDaysDifference * (int)RentalTypePrices.Days50,
-                    RentalType.unknown => 0,
-                    _ => 0
-                };
-            }
-            else if (newExpectedEndDate > r.ExpectedEndDate)
-            {
-                rentalResponse.TotalRentalValue = r.RentalType switch
-                {
-                    RentalType.Days7 => lDaysDifference * (int)RentalTypePrices.Days7,
-                    RentalType.Days15 => lDaysDifference * (int)RentalTypePrices.Days15,
-                    RentalType.Days30 => lDaysDifference * (int)RentalTypePrices.Days30,
-                    RentalType.Days45 => lDaysDifference * (int)RentalTypePrices.Days45,
-                    RentalType.Days50 => lDaysDifference * (int)RentalTypePrices.Days50,
-                    RentalType.unknown => 0,
-                    _ => 0
-                };
-                rentalResponse.TotalRentalValue += (int)(newExpectedEndDate - r.ExpectedEndDate).TotalDays * 50;
-            }
-            else if (newExpectedEndDate < r.ExpectedEndDate)
-            {
-                if (r.RentalType == RentalType.Days7)
-                {
-                    rentalResponse.TotalRentalValue = uDaysDifference * (int)RentalTypePrices.Days7 +
-                                                      (int)(r.ExpectedEndDate - newExpectedEndDate).TotalDays * 0.20;
-                }
-                else if (r.RentalType == RentalType.Days15)
-                {
-                    rentalResponse.TotalRentalValue = uDaysDifference * (int)RentalTypePrices.Days15 +
-                                                      (int)(r.ExpectedEndDate - newExpectedEndDate).TotalDays * 0.40;
-                }
-                else
+                rentalResponse = new RentalResponse(r);
+                var uDaysDifference = (int)(newExpectedEndDate - r.StartDate).TotalDays;
+                var lDaysDifference = (int)(r.ExpectedEndDate - r.StartDate).TotalDays;
+                if (newExpectedEndDate == r.ExpectedEndDate)
                 {
                     rentalResponse.TotalRentalValue = r.RentalType switch
                     {
+                        RentalType.Days7 => uDaysDifference * (int)RentalTypePrices.Days7,
+                        RentalType.Days15 => uDaysDifference * (int)RentalTypePrices.Days15,
                         RentalType.Days30 => uDaysDifference * (int)RentalTypePrices.Days30,
                         RentalType.Days45 => uDaysDifference * (int)RentalTypePrices.Days45,
                         RentalType.Days50 => uDaysDifference * (int)RentalTypePrices.Days50,
@@ -146,17 +119,58 @@ public class RentalService : IRentalService
                         _ => 0
                     };
                 }
+                else if (newExpectedEndDate > r.ExpectedEndDate)
+                {
+                    rentalResponse.TotalRentalValue = r.RentalType switch
+                    {
+                        RentalType.Days7 => lDaysDifference * (int)RentalTypePrices.Days7,
+                        RentalType.Days15 => lDaysDifference * (int)RentalTypePrices.Days15,
+                        RentalType.Days30 => lDaysDifference * (int)RentalTypePrices.Days30,
+                        RentalType.Days45 => lDaysDifference * (int)RentalTypePrices.Days45,
+                        RentalType.Days50 => lDaysDifference * (int)RentalTypePrices.Days50,
+                        RentalType.unknown => 0,
+                        _ => 0
+                    };
+                    rentalResponse.TotalRentalValue += (int)(newExpectedEndDate - r.ExpectedEndDate).TotalDays * 50;
+                }
+                else if (newExpectedEndDate < r.ExpectedEndDate)
+                {
+                    if (r.RentalType == RentalType.Days7)
+                    {
+                        rentalResponse.TotalRentalValue = uDaysDifference * (int)RentalTypePrices.Days7 +
+                                                          (int)(r.ExpectedEndDate - newExpectedEndDate).TotalDays * 0.20;
+                    }
+                    else if (r.RentalType == RentalType.Days15)
+                    {
+                        rentalResponse.TotalRentalValue = uDaysDifference * (int)RentalTypePrices.Days15 +
+                                                          (int)(r.ExpectedEndDate - newExpectedEndDate).TotalDays * 0.40;
+                    }
+                    else
+                    {
+                        rentalResponse.TotalRentalValue = r.RentalType switch
+                        {
+                            RentalType.Days30 => uDaysDifference * (int)RentalTypePrices.Days30,
+                            RentalType.Days45 => uDaysDifference * (int)RentalTypePrices.Days45,
+                            RentalType.Days50 => uDaysDifference * (int)RentalTypePrices.Days50,
+                            RentalType.unknown => 0,
+                            _ => 0
+                        };
+                    }
+                }
+                r.ExpectedEndDate = newExpectedEndDate;
+                await context.SaveChangesAsync();
             }
-            r.ExpectedEndDate = newExpectedEndDate;
-            try { await context.SaveChangesAsync(); }
-            catch (Exception ex) { _logger.LogError($"Failed database changes {ex.Message}"); }
+            else
+            {
+                _logger.LogError($"{id} was not found");
+            }
+            return rentalResponse;
         }
-        else
+        catch (Exception ex)
         {
-            _logger.LogError($"{id} was not found");
-            Console.WriteLine($"{id} was not found");
+            _logger.LogError($"{ex.Message}");
+            return rentalResponse;
         }
-        return rentalResponse;
     }
 }
 

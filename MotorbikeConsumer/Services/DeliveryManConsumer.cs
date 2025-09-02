@@ -29,32 +29,39 @@ public class DeliveryManConsumerService : BackgroundService
     }
     public async Task InitializeAsync()
     {
-        if (_initialized) return;
-
-        var factory = new ConnectionFactory()
+        try
         {
-            HostName = _configuration["RabbitMQ:HostName"] ?? "localhost",
-            Port = int.Parse(_configuration["RabbitMQ:Port"] ?? "5672"),
-            UserName = _configuration["RabbitMQ:UserName"] ?? "guest",
-            Password = _configuration["RabbitMQ:Password"] ?? "guest",
-        };
+            if (_initialized) return;
 
-        _connection = await factory.CreateConnectionAsync();
-        _channel = await _connection.CreateChannelAsync();
+            var factory = new ConnectionFactory()
+            {
+                HostName = _configuration["RabbitMQ:HostName"] ?? "localhost",
+                Port = int.Parse(_configuration["RabbitMQ:Port"] ?? "5672"),
+                UserName = _configuration["RabbitMQ:UserName"] ?? "guest",
+                Password = _configuration["RabbitMQ:Password"] ?? "guest",
+            };
 
-        await _channel.ExchangeDeclareAsync(ExchangeName, ExchangeType.Topic, durable: true, autoDelete: false);
-        await _channel.QueueDeclareAsync(QueueName, durable: true, exclusive: false, autoDelete: false);
-        await _channel.QueueBindAsync(QueueName, ExchangeName, "delivery-man.create");
-        // await _channel.QueueBindAsync(QueueName, ExchangeName, "delivery-man.update");
-        // await _channel.QueueBindAsync(QueueName, ExchangeName, "delivery-man.delete");
-        //////
-        // await _channel.QueueDeclareAsync(RequestQueueName, durable: true, exclusive: false, autoDelete: false);
-        // await _channel.QueueBindAsync(RequestQueueName, ExchangeName, "deliveryMan.get");
-        // await _channel.QueueBindAsync(RequestQueueName, ExchangeName, "deliveryMan.getbyid");
+            _connection = await factory.CreateConnectionAsync();
+            _channel = await _connection.CreateChannelAsync();
 
-        await _channel.BasicQosAsync(0, 1, false);
-        _initialized = true;
-        _logger.LogInformation("DeliveryManConsumerService initialized");
+            await _channel.ExchangeDeclareAsync(ExchangeName, ExchangeType.Topic, durable: true, autoDelete: false);
+            await _channel.QueueDeclareAsync(QueueName, durable: true, exclusive: false, autoDelete: false);
+            await _channel.QueueBindAsync(QueueName, ExchangeName, "delivery-man.create");
+            // await _channel.QueueBindAsync(QueueName, ExchangeName, "delivery-man.update");
+            // await _channel.QueueBindAsync(QueueName, ExchangeName, "delivery-man.delete");
+            //////
+            // await _channel.QueueDeclareAsync(RequestQueueName, durable: true, exclusive: false, autoDelete: false);
+            // await _channel.QueueBindAsync(RequestQueueName, ExchangeName, "deliveryMan.get");
+            // await _channel.QueueBindAsync(RequestQueueName, ExchangeName, "deliveryMan.getbyid");
+
+            await _channel.BasicQosAsync(0, 1, false);
+            _initialized = true;
+            _logger.LogInformation("DeliveryManConsumerService initialized");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError($"{ex.Message}");
+        }
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -65,7 +72,7 @@ public class DeliveryManConsumerService : BackgroundService
 
         if (_channel is null) {
             _logger.LogError("Channel wasn't initialized");
-            throw new Exception($"channel wasn't initialized");
+            throw new Exception($"Channel wasn't initialized");
         }
 
         var consumer = new AsyncEventingBasicConsumer(_channel);
@@ -85,12 +92,6 @@ public class DeliveryManConsumerService : BackgroundService
                     case "create":
                         await deliveryManService.CreateDeliveryManAsync(operationMessage.Data);
                         break;
-                    // case "update":
-                    // await deliveryManService.UpdateDeliveryManAsync(operationMessage.Data);
-                    // break;
-                    // case "delete":
-                    // await deliveryManService.DeleteDeliveryManAsync(operationMessage.Data);
-                    // break;
                     default:
                         _logger.LogError($"no command {operationMessage?.Operation}");
                         break;
@@ -99,28 +100,42 @@ public class DeliveryManConsumerService : BackgroundService
             catch (Exception ex)
             {
                 _logger.LogError($"{ex.Message}");
-                Console.WriteLine($"{ex.Message}");
             }
-            await _channel.BasicNackAsync(ea.DeliveryTag, multiple: false, requeue: false);
-            await Task.Yield();
+            try
+            {
+                await _channel.BasicNackAsync(ea.DeliveryTag, multiple: false, requeue: false);
+                await Task.Yield();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError($"{ex.Message}");
+            }
         };
 
-        await _channel.BasicConsumeAsync(QueueName, false, consumer);
+        try { await _channel.BasicConsumeAsync(QueueName, false, consumer); }
+        catch (Exception ex) { _logger.LogError($"{ex.Message}"); }
     }
     public override async void Dispose()
     {
-        if (_channel != null)
+        try
         {
-            await _channel.CloseAsync();
-            _channel.Dispose();
+            if (_channel != null)
+            {
+                await _channel.CloseAsync();
+                _channel.Dispose();
+            }
+            if (_connection != null)
+            {
+                await _connection.CloseAsync();
+                _connection.Dispose();
+            }
+            base.Dispose();
+            _logger.LogInformation("DeliveryManConsumerService disposed");
         }
-        if (_connection != null)
+        catch (Exception ex)
         {
-            await _connection.CloseAsync();
-            _connection.Dispose();
+            _logger.LogError($"{ex.Message}");
         }
-        base.Dispose();
-        _logger.LogInformation("DeliveryManConsumerService disposed");
     }
 }
 //duplicated code
@@ -130,20 +145,4 @@ public class OperationMessage<T>
     public required T Data { get; set; }
     public required DateTime TimeStamp { get; set; }
     public required string EntityType { get; set; }
-}
-
-public class RequestMessage
-{
-    public required string Operation { get; set; }
-    public object? Data { get; set; }
-    public required string CorrelationId { get; set; }
-    public required string ReplyTo { get; set; }
-}
-
-public class ResponseMessage
-{
-    public bool Success { get; set; }
-    public object? Data { get; set; }
-    public string? Error { get; set; }
-    public required string CorrelationId { get; set; }
 }

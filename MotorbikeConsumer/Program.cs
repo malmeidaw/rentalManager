@@ -52,7 +52,6 @@ builder.Services.AddHostedService<DeliveryManConsumerService>();
 builder.Services.AddScoped<IRentalService, RentalService>();
 builder.Services.AddHostedService<RentalConsumerService>();
 
-//check later "IConfiguration as Singleton"
 builder.Services.AddSingleton<IConfiguration>(builder.Configuration);
 
 var host = builder.Build();
@@ -65,7 +64,7 @@ builder.Logging.AddDebug();
 using (var scope = host.Services.CreateScope())
 {
     var services = scope.ServiceProvider;
-    try //later try to create the table and the db if it does not exist already
+    try
     {
         var context = services.GetRequiredService<AppDbContext>();
         if (await context.Database.CanConnectAsync())
@@ -82,4 +81,7 @@ using (var scope = host.Services.CreateScope())
 }
 
 try { await host.RunAsync(); }
-catch (Exception ex) { Console.WriteLine($"{ex.Message}"); }
+catch (Exception ex)
+{
+    Console.WriteLine($"{ex.Message}");
+}

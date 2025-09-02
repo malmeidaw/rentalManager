@@ -31,29 +31,36 @@ public class RentalConsumerService : BackgroundService
     }
     public async Task InitializeAsync()
     {
-        if (_initialized) return;
-
-        var factory = new ConnectionFactory()
+        try
         {
-            HostName = _configuration["RabbitMQ:HostName"] ?? "localhost",
-            Port = int.Parse(_configuration["RabbitMQ:Port"] ?? "5672"),
-            UserName = _configuration["RabbitMQ:UserName"] ?? "guest",
-            Password = _configuration["RabbitMQ:Password"] ?? "guest",
-        };
+            if (_initialized) return;
 
-        _connection = await factory.CreateConnectionAsync();
-        _channel = await _connection.CreateChannelAsync();
+            var factory = new ConnectionFactory()
+            {
+                HostName = _configuration["RabbitMQ:HostName"] ?? "localhost",
+                Port = int.Parse(_configuration["RabbitMQ:Port"] ?? "5672"),
+                UserName = _configuration["RabbitMQ:UserName"] ?? "guest",
+                Password = _configuration["RabbitMQ:Password"] ?? "guest",
+            };
 
-        await _channel.ExchangeDeclareAsync(ExchangeName, ExchangeType.Topic, durable: true, autoDelete: false);
-        await _channel.QueueDeclareAsync(QueueName, durable: true, exclusive: false, autoDelete: false);
-        await _channel.QueueBindAsync(QueueName, ExchangeName, "rental.create");
-        //////
-        await _channel.QueueDeclareAsync(RequestQueueName, durable: true, exclusive: false, autoDelete: false);
-        await _channel.QueueBindAsync(RequestQueueName, ExchangeName, "rental.update");
-        await _channel.QueueBindAsync(RequestQueueName, ExchangeName, "rental.getbyid");
+            _connection = await factory.CreateConnectionAsync();
+            _channel = await _connection.CreateChannelAsync();
 
-        await _channel.BasicQosAsync(0, 1, false);
-        _initialized = true;
+            await _channel.ExchangeDeclareAsync(ExchangeName, ExchangeType.Topic, durable: true, autoDelete: false);
+            await _channel.QueueDeclareAsync(QueueName, durable: true, exclusive: false, autoDelete: false);
+            await _channel.QueueBindAsync(QueueName, ExchangeName, "rental.create");
+            //////
+            await _channel.QueueDeclareAsync(RequestQueueName, durable: true, exclusive: false, autoDelete: false);
+            await _channel.QueueBindAsync(RequestQueueName, ExchangeName, "rental.update");
+            await _channel.QueueBindAsync(RequestQueueName, ExchangeName, "rental.getbyid");
+
+            await _channel.BasicQosAsync(0, 1, false);
+            _initialized = true;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError($"{ex.Message}");
+        }
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -81,12 +88,6 @@ public class RentalConsumerService : BackgroundService
                     case "create":
                         await rentalService.CreateRentalAsync(operationMessage.Data);
                         break;
-                    // case "update":
-                        // await rentalService.UpdateRentalAsync(operationMessage.Data);
-                        // break;
-                    // case "delete":
-                    // await RentalService.DeleteRentalAsync(operationMessage.Data);
-                    // break;
                     default:
                         _logger.LogError($"no command {operationMessage?.Operation}");
                         break;
@@ -94,10 +95,17 @@ public class RentalConsumerService : BackgroundService
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"{ex.Message}");
+                _logger.LogError($"{ex.Message}");
             }
-            await _channel.BasicNackAsync(ea.DeliveryTag, multiple: false, requeue: false);
-            await Task.Yield();
+            try
+            {
+                await _channel.BasicNackAsync(ea.DeliveryTag, multiple: false, requeue: false);
+                await Task.Yield();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError($"{ex.Message}");
+            }
         };
 
         var requestConsumer = new AsyncEventingBasicConsumer(_channel);
@@ -111,7 +119,6 @@ public class RentalConsumerService : BackgroundService
                 if (requestMessage == null)
                 {
                     _logger.LogError("request message couldn't be read");
-                    Console.WriteLine("request message couldn't be read");
                     throw new Exception("request message couldn't be read");
                 }
 
@@ -123,17 +130,13 @@ public class RentalConsumerService : BackgroundService
 
                 switch (requestMessage?.Operation?.ToLower())
                 {
-                    // case "get":
-                    // var Rentals = await RentalService.GetRentalAsync();
-                    // responseData = Rentals;
-                    // break;
                     case "getbyid":
                         string? id = null;
 
                         if (requestMessage.Data is JsonElement jsonElement &&
                             jsonElement.ValueKind == JsonValueKind.String)
                         {
-                            id = jsonElement.GetString();      
+                            id = jsonElement.GetString();
                         }
                         else
                         {
@@ -150,7 +153,6 @@ public class RentalConsumerService : BackgroundService
                         }
                         break;
                     case "update":
-                        // Rental? r = (Rental?)requestMessage.Data;
                         try
                         {
                             JsonDocument asJson = JsonDocument.Parse(requestMessage?.Data.ToString());
@@ -169,15 +171,13 @@ public class RentalConsumerService : BackgroundService
                             else
                             {
                                 _logger.LogError("Couldn't read new expected end date");
-                                Console.WriteLine("Couldn't read new expected end date");
                             }
                         }
                         catch (Exception ex)
                         {
                             _logger.LogError($"{ex.Message}");
-                            Console.WriteLine($"{ex.Message}");
                         }
-                        
+
                         break;
                     default:
                         success = false;
@@ -192,7 +192,6 @@ public class RentalConsumerService : BackgroundService
                     _logger.LogError($"requestMessage does not have all attributes necessary\n{correlationId} {replyTo} ");
                     throw new Exception($"requestMessage does not have all attributes necessary\n{correlationId} {replyTo} ");
                 }
-                
 
                 var response = new ResponseMessage
                 {
@@ -221,7 +220,6 @@ public class RentalConsumerService : BackgroundService
             catch (Exception ex)
             {
                 _logger.LogError($"{ex.Message}");
-                Console.WriteLine($"{ex.Message}");
                 try
                 {
                     var _ = Encoding.UTF8.GetString(ea.Body.ToArray());
@@ -255,29 +253,48 @@ public class RentalConsumerService : BackgroundService
                 catch (Exception ex_)
                 {
                     _logger.LogError($"{ex_.Message}");
-                    Console.WriteLine($"{ex_.Message}");
                 }
-                await _channel.BasicNackAsync(ea.DeliveryTag, multiple: false, requeue: false);
+                try
+                {
+                    await _channel.BasicNackAsync(ea.DeliveryTag, multiple: false, requeue: false);
+                }
+                catch (Exception ex__)
+                {
+                    _logger.LogError($"{ex__.Message}");
+                }
             }
         };
-        await _channel.BasicConsumeAsync(QueueName, false, consumer);
-        await _channel.BasicConsumeAsync(RequestQueueName, false, requestConsumer);
-
+        try
+        {
+            await _channel.BasicConsumeAsync(QueueName, false, consumer);
+            await _channel.BasicConsumeAsync(RequestQueueName, false, requestConsumer);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError($"{ex.Message}");
+        }
     }
     public override async void Dispose()
     {
-        if (_channel != null)
+        try
         {
-            await _channel.CloseAsync();
-            _channel.Dispose();
+            if (_channel != null)
+            {
+                await _channel.CloseAsync();
+                _channel.Dispose();
+            }
+            if (_connection != null)
+            {
+                await _connection.CloseAsync();
+                _connection.Dispose();
+            }
+            base.Dispose();
+            _logger.LogInformation("RentalConsumerService disposed");
         }
-        if (_connection != null)
+        catch (Exception ex)
         {
-            await _connection.CloseAsync();
-            _connection.Dispose();
-
+            _logger.LogError($"{ex.Message}");
         }
-        base.Dispose();
     }
 }
 
@@ -293,7 +310,7 @@ public class RequestMessage
 {
     public required string Operation { get; set; }
     public object? Data { get; set; }
-    public string? CorrelationId { get; set; } //check if it can be null
+    public string? CorrelationId { get; set; }
     public string? ReplyTo { get; set; }
 }
 

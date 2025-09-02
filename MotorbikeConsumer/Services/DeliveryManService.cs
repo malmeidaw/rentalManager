@@ -5,7 +5,6 @@ using Microsoft.Extensions.Logging;
 
 namespace DeliveryManConsumer.Services;
 
-
 public interface IDeliveryManService
 {
     Task CreateDeliveryManAsync(DeliveryMan deliveryMan);
@@ -24,16 +23,17 @@ public class DeliveryManService : IDeliveryManService
 
     public async Task CreateDeliveryManAsync(DeliveryMan deliveryMan)
     {
-        using var scope = _scopeFactory.CreateScope();
-        var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        context.DeliveryMans.Add(deliveryMan);
         try
         {
+            using var scope = _scopeFactory.CreateScope();
+            var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            context.DeliveryMans.Add(deliveryMan);
             await context.SaveChangesAsync();
             _logger.LogInformation($"{deliveryMan.Id} saved in database.");
-            Console.WriteLine($"{deliveryMan.Id} saved in database.");
         }
-        catch (Exception ex) { _logger.LogError($"Failed database changes {ex.Message}"); }
-        
+        catch (Exception ex)
+        {
+            _logger.LogError($"Failed database changes {ex.Message}");
+        }
     }
 }
