@@ -18,4 +18,5 @@ RUN dotnet publish "MotorbikeConsumer.csproj" -c $configuration -o /app/publish 
 FROM base AS final
 WORKDIR /app
 COPY --from=publish /app/publish .
+COPY --from=build /src/MotorbikeConsumer/appsettings.json ./
 ENTRYPOINT ["dotnet", "MotorbikeConsumer.dll"]

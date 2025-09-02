@@ -11,40 +11,27 @@ using Microsoft.Extensions.Logging;
 
 var builder = Host.CreateApplicationBuilder(args);
 
-string? appSettingsPath = null;
-var commonPaths = new[]
-{
-    Path.Combine("..", "..", "..", "..", "appsettings.json"),
-    Path.Combine("..", "..", "..", "appsettings.json"),
-    Path.Combine("..", "..", "appsettings.json"),
-    "appsettings.json"                                 
-};
+builder.Configuration
+    .SetBasePath(Directory.GetCurrentDirectory())
+    .AddJsonFile("appsettings.json", optional: false, reloadOnChange: true)
+    .AddJsonFile($"appsettings.{builder.Environment.EnvironmentName}.json", optional: true)
+    .AddEnvironmentVariables();
 
-foreach (var relativePath in commonPaths)
-{
-    var fullPath = Path.GetFullPath(relativePath);
-    if (File.Exists(fullPath))
-    {
-        appSettingsPath = fullPath;
-        break;
-    }
-}
+Console.WriteLine($"Environment: {builder.Environment.EnvironmentName}");
+Console.WriteLine($"Current directory: {Directory.GetCurrentDirectory()}");
+Console.WriteLine($"appsettings path: {Path.Combine(Directory.GetCurrentDirectory(), "appsettings.json")}");
+Console.WriteLine($"Does appsettings exist?: {File.Exists(Path.Combine(Directory.GetCurrentDirectory(), "appsettings.json"))}");
 
-
-if (appSettingsPath == null)
-    throw new FileNotFoundException("appsettings.json não encontrado");
-
-builder.Configuration.AddJsonFile(appSettingsPath, optional: false, reloadOnChange: true);
-
-builder.Configuration.AddEnvironmentVariables();
-
-//Db
+// Db
 var connectionString = builder.Configuration.GetConnectionString("DbConnection");
-if (string.IsNullOrEmpty(connectionString)) throw new Exception("Missing DB connection string");
-builder.Services.AddDbContext<AppDbContext>(options => options.UseNpgsql(builder.Configuration.GetConnectionString("DbConnection"),
-                                            o => o.MigrationsHistoryTable("__EFMigrationsHistory", "rental_manager")));
+if (string.IsNullOrEmpty(connectionString)) 
+    throw new Exception("Missing DB connection string");
 
-//services
+builder.Services.AddDbContext<AppDbContext>(options => 
+    options.UseNpgsql(connectionString,
+        o => o.MigrationsHistoryTable("__EFMigrationsHistory", "rental_manager")));
+
+// Services
 builder.Services.AddScoped<IMotorbikeService, MotorbikeService>();
 builder.Services.AddHostedService<MotorbikeConsumerService>();
 builder.Services.AddScoped<IDeliveryManService, DeliveryManService>();
@@ -56,8 +43,7 @@ builder.Services.AddSingleton<IConfiguration>(builder.Configuration);
 
 var host = builder.Build();
 
-//logging
-// builder.Logging.ClearProviders();
+// Logging
 builder.Logging.AddConsole();
 builder.Logging.AddDebug();
 
@@ -70,18 +56,33 @@ using (var scope = host.Services.CreateScope())
         if (await context.Database.CanConnectAsync())
         {
             var pendingMigrations = await context.Database.GetPendingMigrationsAsync();
-            if (pendingMigrations.Any()) await context.Database.MigrateAsync();
+            if (pendingMigrations.Any()) 
+            {
+                Console.WriteLine("Applying pending migrations");
+                await context.Database.MigrateAsync();
+                Console.WriteLine("Migrations applied");
+            }
+            else
+            {
+                Console.WriteLine("No pending Migrations.");
+            }
         }
-        else throw new Exception("Failed DB migrations");
+        else 
+            throw new Exception("Failed to connect to database");
     }
     catch (Exception ex)
     {
-        throw new Exception($"Failed DB connection: {ex.Message}");
+        Console.WriteLine($"Error applying database migrations: {ex.Message}");
+        throw;
     }
 }
 
-try { await host.RunAsync(); }
+try 
+{ 
+    await host.RunAsync(); 
+}
 catch (Exception ex)
 {
-    Console.WriteLine($"{ex.Message}");
+    Console.WriteLine($"Error running Consumer: {ex.Message}");
+    throw;
 }
