@@ -13,11 +13,14 @@ public class RentalController : ControllerBase
     const string entityType = "rental";
     private readonly IRabbitMQService _rabbitMQService;
     private readonly IRabbitMQRpcService _rabbitMQRpcService;
+    private readonly ILogger<RentalController> _logger;
     public RentalController(IRabbitMQService rabbitMQService,
-                            IRabbitMQRpcService rabbitMQRpcService)
+                            IRabbitMQRpcService rabbitMQRpcService,
+                            ILogger<RentalController> logger)
     {
         _rabbitMQService = rabbitMQService;
         _rabbitMQRpcService = rabbitMQRpcService;
+        _logger = logger;
     }
     [HttpPost]
     public async Task<IActionResult> CreateRental([FromBody] RentalJson rentalJson)
@@ -33,7 +36,7 @@ public class RentalController : ControllerBase
                 MotorbikeId = rentalJson.moto_id,
                 StartDate = startDate,
                 EndDate = endDate,
-                ExpectedEndDate = DateTime.TryParse(rentalJson.data_previsao_termino, out var eed) ? eed : DateTime.Now,
+                ExpectedEndDate = DateTime.TryParse(rentalJson.data_previsao_termino, out var eed) ? eed : endDate,
                 RentalType = ToRentalType(rentalJson.plano),
             };
             await _rabbitMQService.PublishMessageAsync<Rental>(rental, "create", entityType);
@@ -41,7 +44,7 @@ public class RentalController : ControllerBase
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"{ex.Message}");
+            _logger.LogError($"{ex.Message}");
             return BadRequest(new { Message = $"Dados inválidos" });
         }
     }
@@ -53,6 +56,7 @@ public class RentalController : ControllerBase
             var rental = await _rabbitMQRpcService.SendRequestAsync<Rental>("getbyid", id, entityType);
             if (rental is null)
             {
+                _logger.LogInformation($"Rental not found by id {id}");
                 return NotFound(new { Message = $"Locação não encontrada" });
             }
             var rentalShown = new RentalJsonShown(rental);
@@ -61,7 +65,7 @@ public class RentalController : ControllerBase
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"{ex.Message}");
+            _logger.LogError($"{ex.Message}");
             return BadRequest(new { Message = $"Locação não encontrada" });
         }
     }
@@ -90,7 +94,7 @@ public class RentalController : ControllerBase
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"{ex.Message}");
+            _logger.LogError($"{ex.Message}");
             return BadRequest(new { Message = $"Dados inválidos" });
         }
     }

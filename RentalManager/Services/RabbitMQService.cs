@@ -1,4 +1,5 @@
 using RabbitMQ.Client;
+using System.Linq.Expressions;
 using System.Text;
 using System.Text.Json;
 
@@ -19,8 +20,13 @@ public class RabbitMQService : IRabbitMQService, IDisposable
     private bool _initialized = false;
     private bool _disposed = false;
     private SemaphoreSlim _lock = new SemaphoreSlim(1, 1);
+    private readonly ILogger<RabbitMQService> _logger;
 
-    public RabbitMQService(IConfiguration configuration) { _configuration = configuration; }
+    public RabbitMQService(IConfiguration configuration, ILogger<RabbitMQService> logger)
+    {
+        _configuration = configuration;
+        _logger = logger;
+    }
     public async Task InitializeAsync()
     {
         if (_initialized) return;
@@ -44,58 +50,82 @@ public class RabbitMQService : IRabbitMQService, IDisposable
                 autoDelete: false
             );
             _initialized = true;
-        } finally { _lock.Release(); }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError($"{ex.Message}");
+        }
+        finally
+        {
+            _lock.Release();
+        }
         
+        _logger.LogInformation("RabbitMQService initialized");
     }
 
     public async Task PublishMessageAsync<T>(T data, string operation, string entityType)
     {
-        if (!_initialized) await InitializeAsync();
-
-        if (_channel is null) throw new Exception($"channel wasn't initialized");
-
-        var message = new OperationMessage<T>
+        try
         {
-            Operation = operation,
-            Data = data,
-            TimeStamp = DateTime.Now,
-            EntityType = entityType
-        };
+            if (!_initialized) await InitializeAsync();
 
-        var json = JsonSerializer.Serialize(message);
-        var body = Encoding.UTF8.GetBytes(json);
+            if (_channel is null) throw new Exception($"channel wasn't initialized");
 
-        var properties = new BasicProperties();
-        properties.Persistent = true; //message survives the application restart
+            var message = new OperationMessage<T>
+            {
+                Operation = operation,
+                Data = data,
+                TimeStamp = DateTime.Now,
+                EntityType = entityType
+            };
 
-        var routingKey = $"{entityType}.{operation}";
+            var json = JsonSerializer.Serialize(message);
+            var body = Encoding.UTF8.GetBytes(json);
 
-        await _channel.BasicPublishAsync(
-            exchange: ExchangeName,
-            routingKey: routingKey,
-            mandatory: true, //false: Discard the message if couldn't be routed, true:sends a Basic message otherwise
-            basicProperties: properties,
-            body: body
-        );
+            var properties = new BasicProperties();
+            properties.Persistent = true; //message survives the application restart
 
-        await Task.CompletedTask;
+            var routingKey = $"{entityType}.{operation}";
+
+            await _channel.BasicPublishAsync(
+                exchange: ExchangeName,
+                routingKey: routingKey,
+                mandatory: true, //false: Discard the message if couldn't be routed, true:sends a Basic message otherwise
+                basicProperties: properties,
+                body: body
+            );
+
+            await Task.CompletedTask;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError($"{ex.Message}");
+        }
     }
 
     public async void Dispose()
     {
-        if (_disposed) return;
-        if (_connection != null)
+        try
         {
-            await _connection.CloseAsync();
-            _connection.Dispose();
+            if (_disposed) return;
+            if (_connection != null)
+            {
+                await _connection.CloseAsync();
+                _connection.Dispose();
+            }
+            if (_channel != null)
+            {
+                await _channel.CloseAsync();
+                _channel.Dispose();
+            }
+            _lock.Dispose();
+            _disposed = true;
         }
-        if (_channel != null)
+        catch (Exception ex)
         {
-            await _channel.CloseAsync();
-            _channel.Dispose();
+            _logger.LogError($"{ex.Message}");
         }
-        _lock.Dispose();
-        _disposed = true;
+        
     }
 }
 

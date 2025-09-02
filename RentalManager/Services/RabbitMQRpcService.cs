@@ -22,10 +22,13 @@ public class RabbitMQRpcService : IRabbitMQRpcService, IDisposable
     private bool _initialized = false;
     private bool _disposed = false;
     private SemaphoreSlim _lock = new SemaphoreSlim(1, 1);
+    private readonly ILogger<RabbitMQRpcService> _logger;
 
-    public RabbitMQRpcService(IConfiguration configuration)
+    public RabbitMQRpcService(IConfiguration configuration,
+                              ILogger<RabbitMQRpcService> logger)
     {
         _configuration = configuration;
+        _logger = logger;
         _pendingRequests = new AsyncDictionary<string, TaskCompletionSource<string>>();
     }
     public async Task InitializeAsync()
@@ -54,7 +57,6 @@ public class RabbitMQRpcService : IRabbitMQRpcService, IDisposable
                 var correlationId = ea.BasicProperties.CorrelationId;
                 if (!string.IsNullOrEmpty(correlationId) && _pendingRequests.TryRemove(correlationId, out var tcs))
                 {
-                    // _pendingRequests.Remove(correlationId);
                     var response = Encoding.UTF8.GetString(ea.Body.ToArray());
                     if (tcs != null) tcs.TrySetResult(response);
                 }
@@ -63,7 +65,15 @@ public class RabbitMQRpcService : IRabbitMQRpcService, IDisposable
             _channel.BasicConsumeAsync(_replyQueueName, true, consumer).GetAwaiter().GetResult();
             _initialized = true;
         }
-        finally { _lock.Release(); }
+        catch (Exception ex)
+        {
+            _logger.LogError($"{ex.Message}");
+        }
+        finally
+        {
+            _lock.Release();
+        }
+        _logger.LogInformation("RabbitMQRpcService initialized");
     }
 
     public async Task<T> SendRequestAsync<T>(string operation, object? data, string? entityType)
@@ -100,13 +110,14 @@ public class RabbitMQRpcService : IRabbitMQRpcService, IDisposable
                 basicProperties: properties,
                 body: body
             );
-            var timeoutTask = Task.Delay(TimeSpan.FromSeconds(32));
+            var timeoutTask = Task.Delay(TimeSpan.FromSeconds(60));
             var completedTask = await Task.WhenAny(tcs.Task, timeoutTask);
 
             if (completedTask == timeoutTask)
             {
                 _pendingRequests.Remove(correlationId);
-                throw new Exception("timed out");
+                _logger.LogError("Timed out");
+                throw new Exception("Timed out");
             }
             var responseJson = await tcs.Task;
             var response = JsonSerializer.Deserialize<ResponseMessage>(responseJson);
@@ -118,25 +129,32 @@ public class RabbitMQRpcService : IRabbitMQRpcService, IDisposable
         catch (Exception ex)
         {
             _pendingRequests.Remove(correlationId);
-            Console.WriteLine($"{ex.Message}");
+            _logger.LogError($"{ex.Message}");
             throw;
         }
     }
     public async void Dispose()
     {
-        if (_disposed) return;
-        if (_connection != null)
+        try
         {
-            await _connection.CloseAsync();
-            _connection.Dispose();
+            if (_disposed) return;
+            if (_connection != null)
+            {
+                await _connection.CloseAsync();
+                _connection.Dispose();
+            }
+            if (_channel != null)
+            {
+                await _channel.CloseAsync();
+                _channel.Dispose();
+            }
+            _lock.Dispose();
+            _disposed = true;
         }
-        if (_channel != null)
+        catch (Exception ex)
         {
-            await _channel.CloseAsync();
-            _channel.Dispose();
+            _logger.LogError($"{ex.Message}");
         }
-        _lock.Dispose();
-        _disposed = true;
     }
 }
 
@@ -152,11 +170,11 @@ public class RequestMessage
 {
     public required string Operation { get; set; }
     public object? Data { get; set; }
-    public required string CorrelationId { get; set; } //check if it can be null
+    public required string CorrelationId { get; set; }
     public required string ReplyTo { get; set; }
 }
 
-public class AsyncDictionary<TKey, TValue> where TKey : notnull//read it better
+public class AsyncDictionary<TKey, TValue> where TKey : notnull
 {
     private readonly Dictionary<TKey, TValue> _dictionary = new();
     private readonly object _lock = new();

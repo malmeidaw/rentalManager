@@ -12,29 +12,45 @@ public class DeliveryManController : ControllerBase
 {
     const string entityType = "delivery-man";
     private readonly IRabbitMQService _rabbitMQService;
-    public DeliveryManController(IRabbitMQService rabbitMQService) { _rabbitMQService = rabbitMQService; }
+    private readonly ILogger<DeliveryManController> _logger;
+    public DeliveryManController(IRabbitMQService rabbitMQService, ILogger<DeliveryManController> logger)
+    {
+        _rabbitMQService = rabbitMQService;
+        _logger = logger;
+    }
 
     [HttpPost]
     public async Task<IActionResult> CreateDeliveryMan([FromBody] DeliveryManJson deliveryManJson)
     {
-        var deliveryMan = new DeliveryMan()
-        {
-            Id = deliveryManJson.identificador,
-            Name = deliveryManJson.nome,
-            LegalId = deliveryManJson.cnpj,
-            BirthDate = DateTime.TryParse(deliveryManJson.data_nascimento, out var bd) ? bd : DateTime.Now, //create a warning
-            DriversLicense = deliveryManJson.numero_cnh, //create a warning
-            DriversLicenseType = ToDriversLicenseType(deliveryManJson.tipo_cnh),
-            DriversLicensePictureLocal = deliveryManJson.imagem_cnh,
-        };
         try
         {
+            DateTime birthDate = new();
+            if (DateTime.TryParse(deliveryManJson.data_nascimento, out var bd))
+            {
+                birthDate = bd;
+            }
+            else
+            {
+                _logger.LogInformation("Couldn't parse birth date received");
+                return BadRequest(new { Message = $"Dados inválidos" });
+            }
+            var deliveryMan = new DeliveryMan()
+            {
+                Id = deliveryManJson.identificador,
+                Name = deliveryManJson.nome,
+                LegalId = deliveryManJson.cnpj,
+                BirthDate = birthDate,
+                DriversLicense = deliveryManJson.numero_cnh,
+                DriversLicenseType = ToDriversLicenseType(deliveryManJson.tipo_cnh),
+                DriversLicensePictureLocal = deliveryManJson.imagem_cnh,
+            };
             await _rabbitMQService.PublishMessageAsync<DeliveryMan>(deliveryMan, "create", entityType);
+            _logger.LogInformation("Creating new deliveryMan");
             return Ok();
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"{ex.Message}");
+            _logger.LogError($"{ex.Message}");
             return BadRequest(new { Message = $"Dados inválidos" });
         }
     }
